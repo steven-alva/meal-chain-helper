@@ -1,10 +1,11 @@
 import re
+import unicodedata
 
 from meal_helper.models import MenuItem, MenuTemplateStore, RestaurantTemplate
 from meal_helper.normalizer import normalize_code
 
 
-MENU_ITEM_RE = re.compile(r"^\s*([A-Za-z])\s*[:：]\s*(.+?)\s*$")
+MENU_ITEM_RE = re.compile(r"^\s*([A-Za-z])\s*(?:[:：]|[.．、\)）])\s*(.+?)\s*$")
 ORDER_LINE_RE = re.compile(r"^\s*\d+[\.\、\)\）]\s*.+$")
 PARENS_RE = re.compile(r"^(.+?)[（(](.*)[）)]\s*$")
 
@@ -14,11 +15,10 @@ FREE_TEXT_KEYWORDS = ("自选", "自定义", "自由")
 def extract_menu_templates(raw_text: str) -> MenuTemplateStore:
     restaurants: list[RestaurantTemplate] = []
     restaurant_by_name: dict[str, RestaurantTemplate] = {}
-    code_owner: dict[str, RestaurantTemplate] = {}
     current_restaurant: RestaurantTemplate | None = None
 
     for raw_line in raw_text.splitlines():
-        line = raw_line.strip()
+        line = _normalize_menu_line(raw_line)
         if not line or _should_ignore_line(line):
             continue
 
@@ -35,12 +35,7 @@ def extract_menu_templates(raw_text: str) -> MenuTemplateStore:
                 description=description,
                 free_text=any(keyword in name for keyword in FREE_TEXT_KEYWORDS),
             )
-            if code in code_owner and code_owner[code] is not current_restaurant:
-                code_owner[code].items = [
-                    existing for existing in code_owner[code].items if existing.code != code
-                ]
             _upsert_item(current_restaurant, item)
-            code_owner[code] = current_restaurant
             continue
 
         restaurant_name, location = _parse_restaurant_line(line)
@@ -55,6 +50,10 @@ def extract_menu_templates(raw_text: str) -> MenuTemplateStore:
             current_restaurant.location = location
 
     return MenuTemplateStore(restaurants=restaurants)
+
+
+def _normalize_menu_line(line: str) -> str:
+    return unicodedata.normalize("NFKC", line).strip()
 
 
 def _should_ignore_line(line: str) -> bool:

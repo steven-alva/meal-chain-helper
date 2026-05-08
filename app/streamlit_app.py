@@ -495,7 +495,7 @@ def _render_menu_maintenance() -> None:
             col_extract, col_save, col_restore = st.columns(3)
             with col_extract:
                 if st.button("提取菜单", use_container_width=True):
-                    extracted = extract_menu_templates(history_text)
+                    extracted = _drop_empty_restaurants(extract_menu_templates(history_text))
                     if _looks_like_order_chain(history_text) and not _store_has_items(extracted):
                         st.session_state.extracted_store = MenuTemplateStore()
                         st.warning("这段看起来像今日接龙清单，请贴到「接龙整理」里～")
