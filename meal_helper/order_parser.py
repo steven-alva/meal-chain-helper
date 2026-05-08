@@ -110,6 +110,10 @@ def _parse_order_body(
                 warnings=warnings,
             )
 
+    text_matched_order = _parse_order_body_by_item_text(seq, body, raw_line, item_by_code)
+    if text_matched_order is not None:
+        return text_matched_order
+
     if free_text_item is not None and re.search(r"\s", body):
         name, note = body.split(maxsplit=1)
         if name.strip() and note.strip():
@@ -129,6 +133,58 @@ def _parse_order_body(
         return _parse_loose_order_body(seq, body, raw_line)
 
     return None
+
+
+def _parse_order_body_by_item_text(
+    seq: int,
+    body: str,
+    raw_line: str,
+    item_by_code: dict[str, MenuItem],
+) -> ParsedOrder | None:
+    best_match: tuple[int, int, str, MenuItem] | None = None
+    for item in item_by_code.values():
+        for alias in _item_aliases(item):
+            start = body.find(alias)
+            if start <= 0:
+                continue
+            candidate = (len(alias), start, alias, item)
+            if best_match is None or candidate[0] > best_match[0]:
+                best_match = candidate
+
+    if best_match is None:
+        return None
+
+    _, start, _alias, item = best_match
+    name = body[:start].strip()
+    note = body[start:].strip()
+    if not name or not note:
+        return None
+
+    return ParsedOrder(
+        seq=seq,
+        name=name,
+        code=normalize_code(item.code),
+        restaurant=item.restaurant,
+        item_name=item.name,
+        note=note,
+        raw_line=raw_line,
+        confidence=0.72,
+        warnings=["按菜名匹配，请确认"],
+    )
+
+
+def _item_aliases(item: MenuItem) -> list[str]:
+    aliases = [item.name]
+    if item.description:
+        aliases.extend(re.split(r"[/／、，,]+", item.description))
+
+    cleaned: list[str] = []
+    for alias in aliases:
+        candidate = alias.strip()
+        if len(candidate) < 2 or candidate in cleaned:
+            continue
+        cleaned.append(candidate)
+    return sorted(cleaned, key=len, reverse=True)
 
 
 def _parse_loose_order_body(seq: int, body: str, raw_line: str) -> ParsedOrder | None:

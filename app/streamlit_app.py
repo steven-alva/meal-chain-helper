@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from meal_helper.history_parser import extract_menu_templates
 from meal_helper.aggregator import group_orders_by_restaurant_and_item
+from meal_helper.chat_intake import build_menu_context_from_chat
 from meal_helper.menu_generator import generate_group_message
 from meal_helper.menu_store import (
     load_menu_templates,
@@ -62,7 +63,6 @@ def main() -> None:
 
     items = _all_available_items()
     selected_items_preview = _selected_items_from_state(items)
-    parse_menu = _today_menu_from_items(selected_items_preview)
     parse_result = st.session_state.parse_result
     unresolved_count = len(parse_result.unresolved) if parse_result else 0
     order_count = len(parse_result.orders) if parse_result else 0
@@ -73,7 +73,7 @@ def main() -> None:
           <div>
             <div class="hero-kicker">TODAY'S LUNCH DESK</div>
             <h1>🍱 接龙点餐小助手</h1>
-            <p>选今天菜单、复制群文案、粘贴接龙，一屏完成。</p>
+            <p>发接龙、收接龙、整理下单，各走各的入口。</p>
           </div>
         </section>
         """,
@@ -91,36 +91,29 @@ def main() -> None:
     st.markdown(
         """
         <div class="step-strip">
-          <div><strong>1</strong><span>贴接龙出清单</span></div>
-          <div><strong>2</strong><span>发群文案时再选菜单</span></div>
+          <div><strong>1</strong><span>发布接龙菜单</span></div>
+          <div><strong>2</strong><span>贴整段聊天整理</span></div>
           <div><strong>3</strong><span>换菜单再维护模板</span></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    _render_parse_panel(parse_menu)
-    _render_results_panel()
+    publish_tab, organize_tab = st.tabs(["发布接龙菜单", "整理下单清单"])
 
-    st.markdown(
-        """
-        <section class="section-break">
-          <span>发布接龙用</span>
-          <h3>菜单和群文案</h3>
-          <p>这块只在要发起今日接龙时使用；主管整理下单清单不需要先动它。</p>
-        </section>
-        """,
-        unsafe_allow_html=True,
-    )
+    with publish_tab:
+        menu_col, message_col = st.columns([1, 1], gap="large")
+        with menu_col:
+            selected_items = _render_menu_panel(items)
 
-    menu_col, message_col = st.columns([1, 1], gap="large")
-    with menu_col:
-        selected_items = _render_menu_panel(items)
+        today_menu = _build_today_menu(selected_items)
 
-    today_menu = _build_today_menu(selected_items)
+        with message_col:
+            _render_message_panel(today_menu)
 
-    with message_col:
-        _render_message_panel(today_menu)
+    with organize_tab:
+        _render_parse_panel(today_menu)
+        _render_results_panel()
 
     _render_menu_maintenance()
 
@@ -326,7 +319,7 @@ def _render_parse_panel(today_menu: TodayMenu) -> None:
           <div class="panel-icon">🧾</div>
           <div>
             <h2>接龙整理</h2>
-            <p>直接贴接龙就能出清单；选过菜单时会自动归类到餐厅。</p>
+            <p>把整段聊天贴进来，我会先识别餐厅菜单，再聚合订单。</p>
           </div>
         </section>
         """,
@@ -334,17 +327,20 @@ def _render_parse_panel(today_menu: TodayMenu) -> None:
     )
 
     today_chain_text = st.text_area(
-        "今日接龙",
-        height=220,
-        placeholder="例如：1. Alex J 鸡胸",
+        "整段聊天记录",
+        height=260,
+        placeholder="可以直接粘贴：今日菜单 + 请大家接龙 + 群里的接龙回复。",
         key="today_chain_text",
     )
 
-    if st.button("整理下单清单", type="primary", use_container_width=True):
-        result = parse_orders(today_chain_text, today_menu)
+    if st.button("生成主管下单清单", type="primary", use_container_width=True):
+        context = build_menu_context_from_chat(today_chain_text, today_menu)
+        result = parse_orders(today_chain_text, context.menu)
         st.session_state.parse_result = result
         st.session_state.manager_summary = render_manager_summary(result)
         st.session_state.debug_json = render_parse_debug_json(result)
+        st.session_state.parse_source = context.source
+        st.session_state.parse_source_note = context.note
         st.rerun()
 
 
@@ -353,10 +349,16 @@ def _render_results_panel() -> None:
         result = st.session_state.parse_result
         if not result:
             return
+        source = st.session_state.get("parse_source", "")
+        source_note = st.session_state.get("parse_source_note", "")
+        if source_note:
+            st.caption(source_note)
         if result and result.unresolved:
             st.warning("这些行我有点拿不准，需要你看一眼～")
-        elif any(order.warnings for order in result.orders):
-            st.info("还没绑定今日菜单，先按接龙里的编号生成临时清单。")
+        elif source == "loose":
+            st.info("这次没有识别到菜单正文，所以先按编号做临时聚合。")
+        elif _has_attention_warnings(result):
+            st.info("有几条是按菜名或自由文本匹配的，建议下单前快速扫一眼。")
         else:
             st.success("看起来都整理好啦～")
 
@@ -379,6 +381,11 @@ def _render_results_panel() -> None:
 
         with st.expander("JSON 调试信息"):
             st.code(st.session_state.debug_json, language="json")
+
+
+def _has_attention_warnings(result) -> bool:
+    ignored = {"未填写备注"}
+    return any(warning not in ignored for order in result.orders for warning in order.warnings)
 
 
 def _render_visual_order_summary(parse_result) -> None:
@@ -578,18 +585,6 @@ def _render_temp_item_form() -> None:
                 st.rerun()
 
 
-def _today_menu_from_items(selected_items: list[MenuItem]) -> TodayMenu:
-    today_items = _renumber_selected_items(selected_items)
-    free_text_codes = [item.code for item in today_items if item.free_text]
-    free_text_default_code = free_text_codes[0] if free_text_codes else None
-
-    return TodayMenu(
-        title=st.session_state.today_title,
-        selected_items=today_items,
-        free_text_default_code=free_text_default_code,
-    )
-
-
 def _build_today_menu(selected_items: list[MenuItem]) -> TodayMenu:
     today_items = _renumber_selected_items(selected_items)
     free_text_codes = [item.code for item in today_items if item.free_text]
@@ -772,6 +767,8 @@ def _clear_order_outputs() -> None:
     st.session_state.parse_result = None
     st.session_state.manager_summary = ""
     st.session_state.debug_json = ""
+    st.session_state.parse_source = ""
+    st.session_state.parse_source_note = ""
 
 
 def _flatten_store_items(store: MenuTemplateStore) -> list[MenuItem]:
@@ -813,6 +810,8 @@ def _ensure_session_state() -> None:
         "parse_result": None,
         "manager_summary": "",
         "debug_json": "",
+        "parse_source": "",
+        "parse_source_note": "",
         "random_pick_note": "",
         "restaurant_pool": [],
         "restaurant_pool_previous": [],
@@ -1025,27 +1024,6 @@ def _apply_style() -> None:
         .step-strip span {
             color: var(--muted);
             font-weight: 800;
-        }
-        .section-break {
-            border-top: 1px solid #eadfd5;
-            margin: 28px 0 16px;
-            padding-top: 18px;
-        }
-        .section-break span {
-            color: var(--accent);
-            font-size: 12px;
-            font-weight: 950;
-            letter-spacing: 0;
-        }
-        .section-break h3 {
-            margin: 2px 0 4px;
-            font-size: 24px;
-            line-height: 1.2;
-        }
-        .section-break p {
-            margin: 0;
-            color: var(--muted);
-            font-size: 14px;
         }
         .panel-title {
             display: flex;
