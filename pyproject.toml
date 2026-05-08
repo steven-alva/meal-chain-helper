@@ -1,0 +1,14 @@
+[project]
+name = "meal-chain-helper"
+version = "0.1.0"
+description = "A cute internal helper for WeChat meal chain messages."
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit",
+    "pyyaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+

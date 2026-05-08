@@ -1,0 +1,78 @@
+restaurants:
+- name: FLAG BENTO
+  location: 星扬西岸店
+  items:
+  - code: A
+    restaurant: FLAG BENTO
+    name: 特色便当🍚
+    description: 🐔🐷双拼/🐔🥑金枪鱼/豆腐/鸡胸/烤🐷/🦐/🥑
+    free_text: false
+  - code: B
+    restaurant: FLAG BENTO
+    name: 意面🍝
+    description: 奶油培根黑松露
+    free_text: false
+  - code: C
+    restaurant: FLAG BENTO
+    name: 烩饭
+    description: 翡翠鸡胸/翡翠🐔🐷/翡翠猪
+    free_text: false
+  - code: D
+    restaurant: FLAG BENTO
+    name: 醋饭
+    description: 芥末章鱼/中华小章鱼
+    free_text: false
+- name: FitBee健康碗
+  location: 徐汇店
+  items:
+  - code: E
+    restaurant: FitBee健康碗
+    name: 健康碗🍚/菠菜面
+    description: 烤🐔/🍗/🦐/鸡胸/石锅🐮肉片
+    free_text: false
+  - code: F
+    restaurant: FitBee健康碗
+    name: 羽衣甘蓝卷
+    description: 香草鸡肉小绿卷
+    free_text: false
+  - code: G
+    restaurant: FitBee健康碗
+    name: 火锅捞烫
+    description: 贵州酸全家福/贵州酸🐮/贵州酸🐔/番茄🐮/番茄🐔
+    free_text: false
+  - code: H
+    restaurant: FitBee健康碗
+    name: 定制均衡碗
+    description: 鸡丝菠菜面/石锅牛肉拌饭
+    free_text: false
+- name: FIKAWKA
+  location: ''
+  items:
+  - code: J
+    restaurant: FIKAWKA
+    name: 色拉🥗
+    description: 三文鱼🥑/鸡胸球/🐮凤梨/🥑菌菇
+    free_text: false
+  - code: K
+    restaurant: FIKAWKA
+    name: 能量碗🍚
+    description: 三文鱼/🐮/🐔牛油果
+    free_text: false
+  - code: L
+    restaurant: FIKAWKA
+    name: 意面🍝
+    description: 🦐芦笋🥚/意式肉酱/菠菜🐔
+    free_text: false
+  - code: M
+    restaurant: FIKAWKA
+    name: 河粉
+    description: 冬阴功🐮/🐔越南粉/🦐🐔冬阴功/越南浓汤
+    free_text: false
+- name: 麦当劳
+  location: ''
+  items:
+  - code: I
+    restaurant: 麦当劳
+    name: 自选 50 元内项目
+    description: ''
+    free_text: true
