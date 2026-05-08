@@ -129,7 +129,7 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
           <div class="panel-icon">🥗</div>
           <div>
             <h2>今日菜单</h2>
-            <p>一键随机三家，也可以按餐厅快速全选/清空。发群时编号自动从 A 往下排。</p>
+            <p>先选餐厅，再看菜品。发群时编号自动从 A 往下排。</p>
           </div>
         </section>
         """,
@@ -171,10 +171,64 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
         st.caption(st.session_state.random_pick_note)
 
     code_preview_by_key = _today_code_preview(items)
-    for restaurant, indexed_items in grouped.items():
-        selected_in_group = sum(
-            1 for index, item in indexed_items if _item_selected_by_state(index, item)
-        )
+    selected_counts = {
+        restaurant: _selected_count(indexed_items)
+        for restaurant, indexed_items in grouped.items()
+    }
+
+    st.markdown(
+        """
+        <div class="restaurant-picker-title">
+          <strong>餐厅池</strong><span>点一下选中，再点一下取消</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    restaurant_entries = list(grouped.items())
+    for row_start in range(0, len(restaurant_entries), 3):
+        chip_cols = st.columns(3, gap="small")
+        for chip_col, (restaurant, indexed_items) in zip(
+            chip_cols, restaurant_entries[row_start : row_start + 3]
+        ):
+            selected_in_group = selected_counts[restaurant]
+            chip_prefix = "✓ " if selected_in_group else ""
+            chip_label = f"{chip_prefix}{restaurant} · {selected_in_group}/{len(indexed_items)}"
+            with chip_col:
+                if st.button(
+                    chip_label,
+                    key=f"restaurant_toggle_{restaurant}",
+                    type="primary" if selected_in_group else "secondary",
+                    use_container_width=True,
+                ):
+                    _set_group_items(indexed_items, selected_in_group == 0)
+                    st.session_state.random_pick_note = ""
+                    _clear_order_outputs()
+                    st.rerun()
+
+    selected_restaurants = [
+        (restaurant, indexed_items)
+        for restaurant, indexed_items in restaurant_entries
+        if selected_counts[restaurant] > 0
+    ]
+
+    if not selected_restaurants:
+        st.info("先从上面的餐厅池选 1 家或点「随机选 3 家」。")
+        with st.expander("临时加一道菜"):
+            _render_temp_item_form()
+        return []
+
+    st.markdown(
+        """
+        <div class="selected-menu-title">
+          <strong>已选餐厅菜单</strong><span>只展开今天会发的餐厅</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for restaurant, indexed_items in selected_restaurants:
+        selected_in_group = selected_counts[restaurant]
         with st.container(border=True):
             st.markdown(
                 f"""
@@ -622,6 +676,10 @@ def _set_group_items(indexed_items: list[tuple[int, MenuItem]], selected: bool) 
         st.session_state[_item_key(index, item)] = selected
 
 
+def _selected_count(indexed_items: list[tuple[int, MenuItem]]) -> int:
+    return sum(1 for index, item in indexed_items if _item_selected_by_state(index, item))
+
+
 def _select_restaurants(
     grouped: dict[str, list[tuple[int, MenuItem]]], selected_restaurants: set[str]
 ) -> None:
@@ -893,6 +951,26 @@ def _apply_style() -> None:
             padding: 7px 0;
             border-bottom: 1px dashed #eadfd5;
             line-height: 1.55;
+        }
+        .restaurant-picker-title,
+        .selected-menu-title {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 12px 0 7px;
+        }
+        .restaurant-picker-title strong,
+        .selected-menu-title strong {
+            font-size: 15px;
+            line-height: 1.25;
+        }
+        .restaurant-picker-title span,
+        .selected-menu-title span {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 800;
+            text-align: right;
         }
         .menu-card-head {
             display: flex;
