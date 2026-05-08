@@ -1,5 +1,6 @@
 from pathlib import Path
 from html import escape
+import random
 import sys
 
 import streamlit as st
@@ -29,6 +30,18 @@ TITLE_HISTORY_PATH = DATA_DIR / "title_history.yml"
 SAMPLE_HISTORY_PATH = DATA_DIR / "sample_history.txt"
 SAMPLE_TODAY_CHAIN_PATH = DATA_DIR / "sample_today_chain.txt"
 DEFAULT_TITLE = "#接龙🥗轻食 5/8 接力棒棒棒🏃‍♀️🏃‍♂️"
+DEFAULT_TODAY_CHAIN_TEXT = """1. We.SNM
+2. 冰✡️saya🫧 麦辣鸡腿堡 + 麦辣鸡翅 + 桃气醒醒气泡美式
+3. 不要向我手指的方向看 E 烤🐔
+4. Jaxon I 鸡胸球
+5. Sirius I 三文鱼
+6. Pepsi 凤梨板烧四件套
+7. 小白的黑色幽默 K 🍤芦笋🥚
+8. Jasper K🦐
+9. hans J🐮
+10. Bruce_Chen I 鸡胸
+11. Henry I 鸡胸
+"""
 
 
 def main() -> None:
@@ -116,7 +129,7 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
           <div class="panel-icon">🥗</div>
           <div>
             <h2>今日菜单</h2>
-            <p>默认全选，不想发的菜取消勾选。</p>
+            <p>一键随机三家，也可以按餐厅快速全选/清空。发群时编号自动从 A 往下排。</p>
           </div>
         </section>
         """,
@@ -132,19 +145,65 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
     for index, item in enumerate(items):
         grouped.setdefault(item.restaurant, []).append((index, item))
 
+    toolbar_cols = st.columns([1, 1, 1], gap="small")
+    with toolbar_cols[0]:
+        if st.button("随机选 3 家", type="primary", use_container_width=True):
+            restaurant_names = list(grouped)
+            chosen = random.sample(restaurant_names, min(3, len(restaurant_names)))
+            _select_restaurants(grouped, set(chosen))
+            st.session_state.random_pick_note = "今日随机组合：" + " / ".join(chosen)
+            _clear_order_outputs()
+            st.rerun()
+    with toolbar_cols[1]:
+        if st.button("全部选上", use_container_width=True):
+            _set_all_items(items, True)
+            st.session_state.random_pick_note = ""
+            _clear_order_outputs()
+            st.rerun()
+    with toolbar_cols[2]:
+        if st.button("先清空", use_container_width=True):
+            _set_all_items(items, False)
+            st.session_state.random_pick_note = ""
+            _clear_order_outputs()
+            st.rerun()
+
+    if st.session_state.random_pick_note:
+        st.caption(st.session_state.random_pick_note)
+
+    code_preview_by_key = _today_code_preview(items)
     for restaurant, indexed_items in grouped.items():
         selected_in_group = sum(
             1 for index, item in indexed_items if _item_selected_by_state(index, item)
         )
-        with st.expander(
-            f"{restaurant} · {selected_in_group}/{len(indexed_items)}",
-            expanded=False,
-        ):
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div class="menu-card-head">
+                  <div><strong>{_h(restaurant)}</strong><span>{selected_in_group}/{len(indexed_items)} 个已选</span></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            group_cols = st.columns([1, 1, 3], gap="small")
+            with group_cols[0]:
+                if st.button("本店全选", key=f"select_all_{restaurant}", use_container_width=True):
+                    _set_group_items(indexed_items, True)
+                    _clear_order_outputs()
+                    st.rerun()
+            with group_cols[1]:
+                if st.button("本店清空", key=f"clear_{restaurant}", use_container_width=True):
+                    _set_group_items(indexed_items, False)
+                    _clear_order_outputs()
+                    st.rerun()
+
             for index, item in indexed_items:
+                item_key = _item_key(index, item)
+                today_code = code_preview_by_key.get(item_key, "—")
                 checked = st.checkbox(
-                    _item_label(item),
+                    _today_item_label(item, today_code),
                     value=True,
-                    key=_item_key(index, item),
+                    key=item_key,
+                    on_change=_clear_order_outputs,
                 )
                 if checked:
                     selected_items.append(item)
@@ -451,7 +510,8 @@ def _render_temp_item_form() -> None:
 
 
 def _build_today_menu(selected_items: list[MenuItem]) -> TodayMenu:
-    free_text_codes = [item.code for item in selected_items if item.free_text]
+    today_items = _renumber_selected_items(selected_items)
+    free_text_codes = [item.code for item in today_items if item.free_text]
     free_text_default_code = free_text_codes[0] if free_text_codes else None
     if len(free_text_codes) > 1:
         free_text_default_code = st.selectbox(
@@ -462,7 +522,7 @@ def _build_today_menu(selected_items: list[MenuItem]) -> TodayMenu:
 
     return TodayMenu(
         title=st.session_state.today_title,
-        selected_items=selected_items,
+        selected_items=today_items,
         free_text_default_code=free_text_default_code,
     )
 
@@ -484,6 +544,12 @@ def _item_label(item: MenuItem) -> str:
     description = f" · {item.description}" if item.description else ""
     free_text = " · 自由文本" if item.free_text else ""
     return f"{item.code}  {item.name}{description}{free_text}"
+
+
+def _today_item_label(item: MenuItem, today_code: str) -> str:
+    description = f" · {item.description}" if item.description else ""
+    free_text = " · 自由文本" if item.free_text else ""
+    return f"{today_code}  {item.name}{description}{free_text}"
 
 
 def _h(value: object) -> str:
@@ -508,6 +574,66 @@ def _selected_items_from_state(items: list[MenuItem]) -> list[MenuItem]:
         for index, item in enumerate(items)
         if _item_selected_by_state(index, item)
     ]
+
+
+def _today_code_preview(items: list[MenuItem]) -> dict[str, str]:
+    code_by_key: dict[str, str] = {}
+    next_code_index = 0
+    for index, item in enumerate(items):
+        if not _item_selected_by_state(index, item):
+            continue
+        code_by_key[_item_key(index, item)] = _auto_code(next_code_index)
+        next_code_index += 1
+    return code_by_key
+
+
+def _renumber_selected_items(items: list[MenuItem]) -> list[MenuItem]:
+    return [
+        MenuItem(
+            code=_auto_code(index),
+            restaurant=item.restaurant,
+            name=item.name,
+            description=item.description,
+            free_text=item.free_text,
+        )
+        for index, item in enumerate(items)
+    ]
+
+
+def _auto_code(index: int) -> str:
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    code = ""
+    value = index
+    while True:
+        value, remainder = divmod(value, len(letters))
+        code = letters[remainder] + code
+        if value == 0:
+            return code
+        value -= 1
+
+
+def _set_all_items(items: list[MenuItem], selected: bool) -> None:
+    for index, item in enumerate(items):
+        st.session_state[_item_key(index, item)] = selected
+
+
+def _set_group_items(indexed_items: list[tuple[int, MenuItem]], selected: bool) -> None:
+    for index, item in indexed_items:
+        st.session_state[_item_key(index, item)] = selected
+
+
+def _select_restaurants(
+    grouped: dict[str, list[tuple[int, MenuItem]]], selected_restaurants: set[str]
+) -> None:
+    for restaurant, indexed_items in grouped.items():
+        _set_group_items(indexed_items, restaurant in selected_restaurants)
+
+
+def _clear_order_outputs() -> None:
+    st.session_state.generated_message = ""
+    st.session_state.parse_result = None
+    st.session_state.manager_summary = ""
+    st.session_state.debug_json = ""
 
 
 def _flatten_store_items(store: MenuTemplateStore) -> list[MenuItem]:
@@ -541,11 +667,12 @@ def _ensure_session_state() -> None:
         "today_menu": TodayMenu(title=DEFAULT_TITLE),
         "today_title": DEFAULT_TITLE,
         "title_history": _load_title_history(),
-        "today_chain_text": _read_text(SAMPLE_TODAY_CHAIN_PATH),
+        "today_chain_text": DEFAULT_TODAY_CHAIN_TEXT,
         "generated_message": "",
         "parse_result": None,
         "manager_summary": "",
         "debug_json": "",
+        "random_pick_note": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -766,6 +893,40 @@ def _apply_style() -> None:
             padding: 7px 0;
             border-bottom: 1px dashed #eadfd5;
             line-height: 1.55;
+        }
+        .menu-card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 1px 0 8px;
+            border-bottom: 1px solid #f0e5db;
+            margin-bottom: 8px;
+        }
+        .menu-card-head strong {
+            display: block;
+            font-size: 16px;
+            line-height: 1.25;
+        }
+        .menu-card-head span {
+            display: block;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 900;
+            margin-top: 2px;
+        }
+        div[data-testid="stCheckbox"] {
+            border-bottom: 1px dashed #f0e5db;
+            padding: 3px 0 5px;
+        }
+        div[data-testid="stCheckbox"]:last-child {
+            border-bottom: 0;
+        }
+        div[data-testid="stCheckbox"] label {
+            align-items: flex-start;
+        }
+        div[data-testid="stCheckbox"] p {
+            line-height: 1.45;
         }
         .order-board {
             border: 1px solid var(--line);
