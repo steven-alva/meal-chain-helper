@@ -14,14 +14,16 @@
 
 ```bash
 cd ~/Desktop
-git clone https://github.com/steven-alva/meal-chain-helper.git
+rm -rf meal-chain-helper meal-chain-helper-main meal-chain-helper.zip
+curl -L --fail -o meal-chain-helper.zip https://github.com/steven-alva/meal-chain-helper/archive/refs/heads/main.zip
+unzip -q meal-chain-helper.zip
+mv meal-chain-helper-main meal-chain-helper
 cd meal-chain-helper
+chmod +x start.command
 ./start.command
 ```
 
-第一次启动会自动准备环境，可能需要一两分钟。
-
-如果电脑提示要安装 Command Line Tools，点「安装」即可。安装完成后重新复制上面的命令。
+这套方式不要求电脑提前安装 Python。第一次启动会自动准备 Python 和小助手环境，需要联网，可能需要一两分钟。
 
 如果网页没有自动打开，手动访问：
 
@@ -43,8 +45,13 @@ cd ~/Desktop/meal-chain-helper
 如果我这边更新了小助手，主管复制：
 
 ```bash
-cd ~/Desktop/meal-chain-helper
-git pull
+cd ~/Desktop
+rm -rf meal-chain-helper meal-chain-helper-main meal-chain-helper.zip
+curl -L --fail -o meal-chain-helper.zip https://github.com/steven-alva/meal-chain-helper/archive/refs/heads/main.zip
+unzip -q meal-chain-helper.zip
+mv meal-chain-helper-main meal-chain-helper
+cd meal-chain-helper
+chmod +x start.command
 ./start.command
 ```
 
