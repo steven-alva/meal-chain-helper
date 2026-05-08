@@ -144,6 +144,7 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
     grouped: dict[str, list[tuple[int, MenuItem]]] = {}
     for index, item in enumerate(items):
         grouped.setdefault(item.restaurant, []).append((index, item))
+    _ensure_item_selection_state(items)
 
     toolbar_cols = st.columns([1, 1, 1], gap="small")
     with toolbar_cols[0]:
@@ -255,7 +256,6 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
                 today_code = code_preview_by_key.get(item_key, "—")
                 checked = st.checkbox(
                     _today_item_label(item, today_code),
-                    value=True,
                     key=item_key,
                     on_change=_clear_order_outputs,
                 )
@@ -616,6 +616,11 @@ def _item_key(index: int, item: MenuItem) -> str:
 
 def _item_selected_by_state(index: int, item: MenuItem) -> bool:
     return bool(st.session_state.get(_item_key(index, item), True))
+
+
+def _ensure_item_selection_state(items: list[MenuItem]) -> None:
+    for index, item in enumerate(items):
+        st.session_state.setdefault(_item_key(index, item), True)
 
 
 def _all_available_items() -> list[MenuItem]:
