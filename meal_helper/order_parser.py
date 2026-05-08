@@ -13,7 +13,11 @@ from meal_helper.normalizer import normalize_code, normalize_name
 
 ORDER_LINE_RE = re.compile(r"^\s*(\d+)[\.\、\)\）]\s*(.+?)\s*$")
 CODE_BOUNDARY_CHARS = r"A-Za-z0-9_"
+LOOSE_CODE_RE = re.compile(
+    rf"(?<![{CODE_BOUNDARY_CHARS}])([A-Za-z])(?![{CODE_BOUNDARY_CHARS}])"
+)
 UNRESOLVED_REASON = "未检测到菜品代码，也无法作为自由文本解析"
+LOOSE_RESTAURANT = "待匹配菜单"
 
 
 def parse_orders(raw_text: str, today_menu: TodayMenu) -> ParseResult:
@@ -121,6 +125,52 @@ def _parse_order_body(
                 warnings=["自由文本解析，请确认"],
             )
 
+    if not item_by_code:
+        return _parse_loose_order_body(seq, body, raw_line)
+
+    return None
+
+
+def _parse_loose_order_body(seq: int, body: str, raw_line: str) -> ParsedOrder | None:
+    for code_match in LOOSE_CODE_RE.finditer(body):
+        name = body[: code_match.start()].strip()
+        if not name:
+            continue
+
+        code = normalize_code(code_match.group(1))
+        note = body[code_match.end() :].strip()
+        warnings = ["未绑定今日菜单，请确认菜品"]
+        confidence = 0.62
+        if not note:
+            warnings.append("未填写备注")
+            confidence = 0.55
+        return ParsedOrder(
+            seq=seq,
+            name=name,
+            code=code,
+            restaurant=LOOSE_RESTAURANT,
+            item_name=f"选项 {code}",
+            note=note,
+            raw_line=raw_line,
+            confidence=confidence,
+            warnings=warnings,
+        )
+
+    if re.search(r"\s", body):
+        name, note = body.split(maxsplit=1)
+        if name.strip() and note.strip():
+            return ParsedOrder(
+                seq=seq,
+                name=name.strip(),
+                code="手填",
+                restaurant=LOOSE_RESTAURANT,
+                item_name=note.strip(),
+                note=note.strip(),
+                raw_line=raw_line,
+                confidence=0.5,
+                warnings=["未检测到菜单编号，请确认菜品"],
+            )
+
     return None
 
 
@@ -144,4 +194,3 @@ def _get_free_text_item(
     if item and item.free_text:
         return item
     return None
-

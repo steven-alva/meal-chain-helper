@@ -304,7 +304,7 @@ def _render_parse_panel(today_menu: TodayMenu) -> None:
           <div class="panel-icon">🧾</div>
           <div>
             <h2>接龙整理</h2>
-            <p>把接龙贴进来，我来分餐厅和菜品。</p>
+            <p>直接贴接龙就能出清单；选过菜单时会自动归类到餐厅。</p>
           </div>
         </section>
         """,
@@ -319,9 +319,6 @@ def _render_parse_panel(today_menu: TodayMenu) -> None:
     )
 
     if st.button("整理下单清单", type="primary", use_container_width=True):
-        if not today_menu.selected_items:
-            st.warning("需要先确认今天有哪些菜品，我才能解析接龙～")
-            return
         result = parse_orders(today_chain_text, today_menu)
         st.session_state.parse_result = result
         st.session_state.manager_summary = render_manager_summary(result)
@@ -336,6 +333,8 @@ def _render_results_panel() -> None:
             return
         if result and result.unresolved:
             st.warning("这些行我有点拿不准，需要你看一眼～")
+        elif any(order.warnings for order in result.orders):
+            st.info("还没绑定今日菜单，先按接龙里的编号生成临时清单。")
         else:
             st.success("看起来都整理好啦～")
 
