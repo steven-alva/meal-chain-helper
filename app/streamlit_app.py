@@ -30,6 +30,7 @@ TITLE_HISTORY_PATH = DATA_DIR / "title_history.yml"
 SAMPLE_HISTORY_PATH = DATA_DIR / "sample_history.txt"
 SAMPLE_TODAY_CHAIN_PATH = DATA_DIR / "sample_today_chain.txt"
 DEFAULT_TITLE = "#接龙🥗轻食 5/8 接力棒棒棒🏃‍♀️🏃‍♂️"
+MENU_STATE_VERSION = 2
 DEFAULT_TODAY_CHAIN_TEXT = """1. We.SNM
 2. 冰✡️saya🫧 麦辣鸡腿堡 + 麦辣鸡翅 + 桃气醒醒气泡美式
 3. 不要向我手指的方向看 E 烤🐔
@@ -145,25 +146,27 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
     for index, item in enumerate(items):
         grouped.setdefault(item.restaurant, []).append((index, item))
     _ensure_item_selection_state(items)
+    _ensure_restaurant_pool_state(grouped)
+    _sync_restaurant_pool(grouped, st.session_state.restaurant_pool)
 
     toolbar_cols = st.columns([1, 1, 1], gap="small")
     with toolbar_cols[0]:
         if st.button("随机选 3 家", type="primary", use_container_width=True):
             restaurant_names = list(grouped)
             chosen = random.sample(restaurant_names, min(3, len(restaurant_names)))
-            _select_restaurants(grouped, set(chosen))
-            st.session_state.random_pick_note = "今日随机组合：" + " / ".join(chosen)
+            _select_restaurants(grouped, chosen)
+            st.session_state.random_pick_note = ""
             _clear_order_outputs()
             st.rerun()
     with toolbar_cols[1]:
         if st.button("全部选上", use_container_width=True):
-            _set_all_items(items, True)
+            _select_restaurants(grouped, list(grouped))
             st.session_state.random_pick_note = ""
             _clear_order_outputs()
             st.rerun()
     with toolbar_cols[2]:
         if st.button("先清空", use_container_width=True):
-            _set_all_items(items, False)
+            _select_restaurants(grouped, [])
             st.session_state.random_pick_note = ""
             _clear_order_outputs()
             st.rerun()
@@ -173,7 +176,7 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
 
     code_preview_by_key = _today_code_preview(items)
     selected_counts = {
-        restaurant: _selected_count(indexed_items)
+        restaurant: _selected_count(restaurant, indexed_items)
         for restaurant, indexed_items in grouped.items()
     }
 
@@ -187,30 +190,21 @@ def _render_menu_panel(items: list[MenuItem]) -> list[MenuItem]:
     )
 
     restaurant_entries = list(grouped.items())
-    for row_start in range(0, len(restaurant_entries), 3):
-        chip_cols = st.columns(3, gap="small")
-        for chip_col, (restaurant, indexed_items) in zip(
-            chip_cols, restaurant_entries[row_start : row_start + 3]
-        ):
-            selected_in_group = selected_counts[restaurant]
-            chip_prefix = "✓ " if selected_in_group else ""
-            chip_label = f"{chip_prefix}{restaurant} · {selected_in_group}/{len(indexed_items)}"
-            with chip_col:
-                if st.button(
-                    chip_label,
-                    key=f"restaurant_toggle_{restaurant}",
-                    type="primary" if selected_in_group else "secondary",
-                    use_container_width=True,
-                ):
-                    _set_group_items(indexed_items, selected_in_group == 0)
-                    st.session_state.random_pick_note = ""
-                    _clear_order_outputs()
-                    st.rerun()
+    st.pills(
+        "餐厅池",
+        options=[restaurant for restaurant, _ in restaurant_entries],
+        selection_mode="multi",
+        format_func=lambda restaurant: _restaurant_pill_label(
+            restaurant, selected_counts[restaurant], len(grouped[restaurant])
+        ),
+        key="restaurant_pool",
+        label_visibility="collapsed",
+    )
 
     selected_restaurants = [
         (restaurant, indexed_items)
         for restaurant, indexed_items in restaurant_entries
-        if selected_counts[restaurant] > 0
+        if _restaurant_selected_by_state(restaurant)
     ]
 
     if not selected_restaurants:
@@ -618,9 +612,29 @@ def _item_selected_by_state(index: int, item: MenuItem) -> bool:
     return bool(st.session_state.get(_item_key(index, item), True))
 
 
+def _restaurant_selected_by_state(restaurant: str) -> bool:
+    return restaurant in st.session_state.get("restaurant_pool", [])
+
+
 def _ensure_item_selection_state(items: list[MenuItem]) -> None:
     for index, item in enumerate(items):
         st.session_state.setdefault(_item_key(index, item), True)
+
+
+def _ensure_restaurant_pool_state(grouped: dict[str, list[tuple[int, MenuItem]]]) -> None:
+    valid_restaurants = set(grouped)
+    current = [
+        restaurant
+        for restaurant in st.session_state.get("restaurant_pool", [])
+        if restaurant in valid_restaurants
+    ]
+    previous = [
+        restaurant
+        for restaurant in st.session_state.get("restaurant_pool_previous", [])
+        if restaurant in valid_restaurants
+    ]
+    st.session_state.restaurant_pool = current
+    st.session_state.restaurant_pool_previous = previous
 
 
 def _all_available_items() -> list[MenuItem]:
@@ -631,7 +645,8 @@ def _selected_items_from_state(items: list[MenuItem]) -> list[MenuItem]:
     return [
         item
         for index, item in enumerate(items)
-        if _item_selected_by_state(index, item)
+        if _restaurant_selected_by_state(item.restaurant)
+        and _item_selected_by_state(index, item)
     ]
 
 
@@ -639,6 +654,8 @@ def _today_code_preview(items: list[MenuItem]) -> dict[str, str]:
     code_by_key: dict[str, str] = {}
     next_code_index = 0
     for index, item in enumerate(items):
+        if not _restaurant_selected_by_state(item.restaurant):
+            continue
         if not _item_selected_by_state(index, item):
             continue
         code_by_key[_item_key(index, item)] = _auto_code(next_code_index)
@@ -671,25 +688,50 @@ def _auto_code(index: int) -> str:
         value -= 1
 
 
-def _set_all_items(items: list[MenuItem], selected: bool) -> None:
-    for index, item in enumerate(items):
-        st.session_state[_item_key(index, item)] = selected
-
-
 def _set_group_items(indexed_items: list[tuple[int, MenuItem]], selected: bool) -> None:
     for index, item in indexed_items:
         st.session_state[_item_key(index, item)] = selected
 
 
-def _selected_count(indexed_items: list[tuple[int, MenuItem]]) -> int:
+def _selected_count(restaurant: str, indexed_items: list[tuple[int, MenuItem]]) -> int:
+    if not _restaurant_selected_by_state(restaurant):
+        return 0
     return sum(1 for index, item in indexed_items if _item_selected_by_state(index, item))
 
 
 def _select_restaurants(
-    grouped: dict[str, list[tuple[int, MenuItem]]], selected_restaurants: set[str]
+    grouped: dict[str, list[tuple[int, MenuItem]]], selected_restaurants: list[str]
 ) -> None:
+    valid_selection = [restaurant for restaurant in selected_restaurants if restaurant in grouped]
+    selected_set = set(valid_selection)
     for restaurant, indexed_items in grouped.items():
-        _set_group_items(indexed_items, restaurant in selected_restaurants)
+        if restaurant in selected_set:
+            _set_group_items(indexed_items, True)
+    st.session_state.restaurant_pool = valid_selection
+    st.session_state.restaurant_pool_previous = valid_selection
+
+
+def _sync_restaurant_pool(
+    grouped: dict[str, list[tuple[int, MenuItem]]], selected_restaurants: list[str] | None
+) -> None:
+    selected = [restaurant for restaurant in (selected_restaurants or []) if restaurant in grouped]
+    previous = [
+        restaurant
+        for restaurant in st.session_state.get("restaurant_pool_previous", [])
+        if restaurant in grouped
+    ]
+    newly_selected = set(selected) - set(previous)
+    for restaurant in newly_selected:
+        _set_group_items(grouped[restaurant], True)
+    if set(selected) != set(previous):
+        st.session_state.random_pick_note = ""
+        _clear_order_outputs()
+    st.session_state.restaurant_pool = selected
+    st.session_state.restaurant_pool_previous = selected
+
+
+def _restaurant_pill_label(restaurant: str, selected_count: int, total_count: int) -> str:
+    return f"{restaurant} {selected_count}/{total_count}"
 
 
 def _clear_order_outputs() -> None:
@@ -736,10 +778,18 @@ def _ensure_session_state() -> None:
         "manager_summary": "",
         "debug_json": "",
         "random_pick_note": "",
+        "restaurant_pool": [],
+        "restaurant_pool_previous": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    if st.session_state.get("menu_state_version") != MENU_STATE_VERSION:
+        st.session_state.restaurant_pool = []
+        st.session_state.restaurant_pool_previous = []
+        st.session_state.random_pick_note = ""
+        _clear_order_outputs()
+        st.session_state.menu_state_version = MENU_STATE_VERSION
 
 
 def _sanitize_session_stores() -> None:
@@ -976,6 +1026,13 @@ def _apply_style() -> None:
             font-size: 12px;
             font-weight: 800;
             text-align: right;
+        }
+        div[data-testid="stPills"] button {
+            min-height: 30px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 800;
         }
         .menu-card-head {
             display: flex;
