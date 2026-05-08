@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import date
 from html import escape
 import random
 import sys
@@ -29,7 +30,6 @@ MENU_TEMPLATE_PATH = DATA_DIR / "menu_templates.yml"
 TITLE_HISTORY_PATH = DATA_DIR / "title_history.yml"
 SAMPLE_HISTORY_PATH = DATA_DIR / "sample_history.txt"
 SAMPLE_TODAY_CHAIN_PATH = DATA_DIR / "sample_today_chain.txt"
-DEFAULT_TITLE = "#接龙🥗轻食 5/8 接力棒棒棒🏃‍♀️🏃‍♂️"
 MENU_STATE_VERSION = 2
 DEFAULT_TODAY_CHAIN_TEXT = """1. We.SNM
 2. 冰✡️saya🫧 麦辣鸡腿堡 + 麦辣鸡翅 + 桃气醒醒气泡美式
@@ -45,6 +45,15 @@ DEFAULT_TODAY_CHAIN_TEXT = """1. We.SNM
 """
 
 
+def _date_label(current_date: date | None = None) -> str:
+    current = current_date or date.today()
+    return f"{current.month}/{current.day}"
+
+
+def _default_title(current_date: date | None = None) -> str:
+    return f"#接龙🥗轻食 {_date_label(current_date)} 接力棒棒棒🏃‍♀️🏃‍♂️"
+
+
 def main() -> None:
     st.set_page_config(page_title="接龙点餐小助手", page_icon="🍱", layout="wide")
     _apply_style()
@@ -53,6 +62,7 @@ def main() -> None:
 
     items = _all_available_items()
     selected_items_preview = _selected_items_from_state(items)
+    parse_menu = _today_menu_from_items(selected_items_preview)
     parse_result = st.session_state.parse_result
     unresolved_count = len(parse_result.unresolved) if parse_result else 0
     order_count = len(parse_result.orders) if parse_result else 0
@@ -81,25 +91,37 @@ def main() -> None:
     st.markdown(
         """
         <div class="step-strip">
-          <div><strong>1</strong><span>勾选今日菜单</span></div>
-          <div><strong>2</strong><span>生成群文案</span></div>
-          <div><strong>3</strong><span>粘贴接龙出清单</span></div>
+          <div><strong>1</strong><span>贴接龙出清单</span></div>
+          <div><strong>2</strong><span>发群文案时再选菜单</span></div>
+          <div><strong>3</strong><span>换菜单再维护模板</span></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    menu_col, work_col = st.columns([0.92, 1.08], gap="large")
+    _render_parse_panel(parse_menu)
+    _render_results_panel()
+
+    st.markdown(
+        """
+        <section class="section-break">
+          <span>发布接龙用</span>
+          <h3>菜单和群文案</h3>
+          <p>这块只在要发起今日接龙时使用；主管整理下单清单不需要先动它。</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    menu_col, message_col = st.columns([1, 1], gap="large")
     with menu_col:
         selected_items = _render_menu_panel(items)
 
     today_menu = _build_today_menu(selected_items)
 
-    with work_col:
+    with message_col:
         _render_message_panel(today_menu)
-        _render_parse_panel(today_menu)
 
-    _render_results_panel()
     _render_menu_maintenance()
 
 
@@ -556,6 +578,18 @@ def _render_temp_item_form() -> None:
                 st.rerun()
 
 
+def _today_menu_from_items(selected_items: list[MenuItem]) -> TodayMenu:
+    today_items = _renumber_selected_items(selected_items)
+    free_text_codes = [item.code for item in today_items if item.free_text]
+    free_text_default_code = free_text_codes[0] if free_text_codes else None
+
+    return TodayMenu(
+        title=st.session_state.today_title,
+        selected_items=today_items,
+        free_text_default_code=free_text_default_code,
+    )
+
+
 def _build_today_menu(selected_items: list[MenuItem]) -> TodayMenu:
     today_items = _renumber_selected_items(selected_items)
     free_text_codes = [item.code for item in today_items if item.free_text]
@@ -764,12 +798,15 @@ def _looks_like_order_chain(raw_text: str) -> bool:
 
 
 def _ensure_session_state() -> None:
+    today_default_title = _default_title()
     defaults = {
         "template_store": load_menu_templates(str(MENU_TEMPLATE_PATH)),
         "extracted_store": MenuTemplateStore(),
         "temp_items": [],
-        "today_menu": TodayMenu(title=DEFAULT_TITLE),
-        "today_title": DEFAULT_TITLE,
+        "today_menu": TodayMenu(title=today_default_title),
+        "today_title": today_default_title,
+        "title_date": _date_label(),
+        "title_default": today_default_title,
         "title_history": _load_title_history(),
         "today_chain_text": DEFAULT_TODAY_CHAIN_TEXT,
         "generated_message": "",
@@ -783,12 +820,27 @@ def _ensure_session_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    _refresh_daily_title_defaults()
     if st.session_state.get("menu_state_version") != MENU_STATE_VERSION:
         st.session_state.restaurant_pool = []
         st.session_state.restaurant_pool_previous = []
         st.session_state.random_pick_note = ""
         _clear_order_outputs()
         st.session_state.menu_state_version = MENU_STATE_VERSION
+
+
+def _refresh_daily_title_defaults() -> None:
+    today_label = _date_label()
+    if st.session_state.get("title_date") == today_label:
+        return
+
+    old_default = st.session_state.get("title_default", "")
+    today_default = _default_title()
+    if not st.session_state.get("today_title") or st.session_state.today_title == old_default:
+        st.session_state.today_title = today_default
+    st.session_state.title_default = today_default
+    st.session_state.title_date = today_label
+    st.session_state.title_history = _load_title_history()
 
 
 def _sanitize_session_stores() -> None:
@@ -810,17 +862,19 @@ def _read_text(path: Path) -> str:
 
 def _load_title_history() -> list[str]:
     default_titles = [
-        DEFAULT_TITLE,
-        "#接龙🥗午饭 5/8 今天吃点好的～",
-        "#接龙🍱晚饭 5/8 接一下～",
+        _default_title(),
+        f"#接龙🥗午饭 {_date_label()} 今天吃点好的～",
+        f"#接龙🍱晚饭 {_date_label()} 接一下～",
     ]
     if not TITLE_HISTORY_PATH.exists():
         return default_titles
 
     data = yaml.safe_load(TITLE_HISTORY_PATH.read_text(encoding="utf-8")) or {}
     loaded_titles = data.get("titles", [])
-    titles = [title for title in loaded_titles if isinstance(title, str) and title.strip()]
-    for title in default_titles:
+    titles = []
+    for title in default_titles + loaded_titles:
+        if not isinstance(title, str) or not title.strip():
+            continue
         if title not in titles:
             titles.append(title)
     return titles[:8]
@@ -971,6 +1025,27 @@ def _apply_style() -> None:
         .step-strip span {
             color: var(--muted);
             font-weight: 800;
+        }
+        .section-break {
+            border-top: 1px solid #eadfd5;
+            margin: 28px 0 16px;
+            padding-top: 18px;
+        }
+        .section-break span {
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 950;
+            letter-spacing: 0;
+        }
+        .section-break h3 {
+            margin: 2px 0 4px;
+            font-size: 24px;
+            line-height: 1.2;
+        }
+        .section-break p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
         }
         .panel-title {
             display: flex;
